@@ -1,0 +1,66 @@
+=================================================================
+          OPENFOAM GEOMETRY PACKAGE AND DESIGN SUMMARY
+=================================================================
+
+Design ID:               pump-d0ca05233164f089
+Pump Architecture:        Single stage
+Stage Count:              1
+Component Sequence:       Inlet -> Impeller 1 (Radial) -> Vaneless rotor-stator gap -> Volute -> Cutwater -> Discharge diffuser
+CAD Scope:                Radial impeller plus single-volute, compensated cutwater, and tangential discharge-diffuser material CAD; connected rotating and stationary fluid-domain export with a cylindrical RSI is supported.
+Fluid Type:              Water
+Operating Temperature:   25.0 °C
+Density (rho):           996.93 kg/m^3
+Kinematic Viscosity (nu): 8.932e-07 m^2/s
+Vapor Pressure (Pv):     3157.9 Pa
+
+OPERATING POINT:
+  Target Head (H):       45.0 m
+  Flow Rate (Q):         120.0 m^3/h (0.0333 m^3/s)
+  Rotational Speed (N):  2950 RPM
+  Angular Velocity (w):  308.92 rad/s
+
+ESTIMATED PERFORMANCE:
+  Specific Speed (Nq):   31.0 (metric)
+  Total Efficiency:      79.1 %
+  Hydraulic Efficiency:  87.2 %
+  Shaft Power:           18.53 kW
+  Estimated NPSHr:       3.51 m
+  Velocity-triangle head closure: 45.03 m
+
+GEOMETRY SIZING:
+  Impeller Configuration: Closed
+  Impeller Eye (Ds):     116.9 mm
+  Impeller Hub (Dh):     40.3 mm
+  Impeller Outlet (D2):  178.3 mm
+  Outlet Width (b2):     21.9 mm
+  Blade Count (Z):       7
+  Blade Inlet Angle:     22.0 °
+  Blade Outlet Angle:    33.4 °
+  Blade Edge Shape:      Ellipse, axis ratio 1.00
+  Blade Edge Radius:     LE 0.750 mm / TE 0.750 mm
+  Minimum Blade Throat:  13.101 mm
+  Blade Throat Area:     417.115 mm^2
+  Passage Area Step Max: 4.831 %
+  Volute Inlet (D4):     192.6 mm
+  Volute Width (b4):     24.4 mm
+  Volute Wrap:           350.0 deg
+  Cutwater Thickness:    4.4 mm
+  Discharge Diffuser:    Aout/Ain=1.538, cone=3.98 deg
+
+ENGINEERING CHECKS:
+  Passed: 33; Warnings: 3
+  [WARNING] stage_1.outlet_deviation: Stage 1: Outlet deviation angle is outside the reference range 0..14 deg.
+  [WARNING] stage_1.diffuser_length_to_throat: Stage 1: Preliminary radial-diffuser L34/a3 is outside the reference range 2.5..6 -.
+  [WARNING] stage_1.npsh_evidence: Stage 1: NPSHr is estimated; NPSHa and suction-system evidence are not supplied.
+
+OPENFOAM GEOMETRY NOTES:
+  STL coordinate units: metres (STEP model units remain millimetres).
+  A closed rotating fluid domain and single volute with tangential discharge diffuser are included.
+  RSI: cylindrical mid-gap interface at r = 92.726 mm.
+  Named surface patches: rotor_inlet, rotor_rsi, rotor_walls, stationary_outlet, stationary_rsi, stationary_walls.
+  1. Use rotor_rsi/stationary_rsi as a matched cyclicAMI interface pair.
+  2. Define the rotating cell zone with omega = (0 0 308.92).
+  3. Apply the inlet condition on rotor_inlet.
+  4. Apply the pressure outlet condition on stationary_outlet.
+  5. Generate and verify the mesh before solving.
+=================================================================

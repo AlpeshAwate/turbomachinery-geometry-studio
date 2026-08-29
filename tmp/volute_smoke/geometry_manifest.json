@@ -1,0 +1,461 @@
+{
+  "schema_version": 6,
+  "design_id": "pump-d0ca05233164f089",
+  "package_type": "openfoam_complete_single_stage_volute_domain",
+  "stl_coordinate_unit": "m",
+  "step_model_unit": "mm",
+  "connected_solid_validation": true,
+  "operating_point": {
+    "head_m": 45,
+    "flow_m3_s": 0.03333333333333333,
+    "rpm": 2950,
+    "omega_rad_s": 308.92327760299634
+  },
+  "impeller_configuration": "Closed",
+  "main_dimension_correlations": {
+    "intake_coefficient_epsilon": 0.1267,
+    "outlet_width_ratio_b2_d2": 0.1229,
+    "meridional_deceleration_ratio_cm2_cm1": 0.694,
+    "slip_factor_sigma": 0.81
+  },
+  "generated_components": {
+    "impeller": false,
+    "single_volute_casing": true,
+    "vaned_radial_diffuser": false,
+    "rotating_fluid_domain": true,
+    "stationary_volute_fluid_domain": true,
+    "stationary_rsi_connection": false
+  },
+  "volute_geometry": {
+    "volute_type": "Single",
+    "design_rule": "Pfleiderer angular momentum, cu*r^1 = constant",
+    "cross_section_type": "Rectangular with cutwater compensation",
+    "discharge_diffuser_type": "Tangential rectangular",
+    "internal_flow_rate_m3_s": 0.03562766,
+    "inlet_diameter_d4": 192.603,
+    "inlet_width_b4": 24.379,
+    "inlet_width_ratio_b4_b2": 1.112,
+    "inlet_meridional_velocity_cm4": 2.4152,
+    "inlet_tangential_velocity_cu4": 17.0145,
+    "inlet_flow_angle_alpha4": 8.0792,
+    "wrap_angle_deg": 350.0,
+    "blind_flow_fraction": 0.025,
+    "cutwater_compensation_start_deg": 270.0,
+    "cutwater_thickness_mm": 4.388,
+    "cutwater_clearance_mm": 7.133,
+    "wall_thickness_mm": 4.388,
+    "station_angles_deg": [
+      0.0,
+      9.7222,
+      19.4444,
+      29.1667,
+      38.8889,
+      48.6111,
+      58.3333,
+      68.0556,
+      77.7778,
+      87.5,
+      97.2222,
+      106.9444,
+      116.6667,
+      126.3889,
+      136.1111,
+      145.8333,
+      155.5556,
+      165.2778,
+      175.0,
+      184.7222,
+      194.4444,
+      204.1667,
+      213.8889,
+      223.6111,
+      233.3333,
+      243.0556,
+      252.7778,
+      262.5,
+      272.2222,
+      281.9444,
+      291.6667,
+      301.3889,
+      311.1111,
+      320.8333,
+      330.5556,
+      340.2778,
+      350.0
+    ],
+    "station_inner_radii_mm": [
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.3015,
+      96.4234,
+      96.9567,
+      97.49,
+      98.0233,
+      98.5566,
+      99.0899,
+      99.6232,
+      100.1565,
+      100.6897
+    ],
+    "station_outer_radii_mm": [
+      98.4729,
+      100.8805,
+      103.347,
+      105.8739,
+      108.4624,
+      111.1143,
+      113.831,
+      116.6142,
+      119.4654,
+      122.3863,
+      125.3786,
+      128.4441,
+      131.5845,
+      134.8017,
+      138.0976,
+      141.474,
+      144.933,
+      148.4766,
+      152.1068,
+      155.8258,
+      159.6357,
+      163.5387,
+      167.5372,
+      171.6335,
+      175.8299,
+      180.1289,
+      184.533,
+      189.0448,
+      193.912,
+      199.7518,
+      205.7612,
+      211.9451,
+      218.3084,
+      224.8562,
+      231.5936,
+      238.526,
+      245.6591
+    ],
+    "station_areas_mm2": [
+      52.9369,
+      111.6331,
+      171.7643,
+      233.3657,
+      296.4733,
+      361.1238,
+      427.3551,
+      495.2056,
+      564.7151,
+      635.9241,
+      708.8741,
+      783.6078,
+      860.1686,
+      938.6014,
+      1018.9518,
+      1101.2667,
+      1185.5943,
+      1271.9836,
+      1360.4851,
+      1451.1505,
+      1544.0326,
+      1639.1857,
+      1736.6652,
+      1836.5281,
+      1938.8326,
+      2043.6384,
+      2151.0067,
+      2261.0001,
+      2376.6874,
+      2506.0554,
+      2639.5593,
+      2777.316,
+      2919.4461,
+      3066.0732,
+      3217.3245,
+      3373.3307,
+      3534.2261
+    ],
+    "discharge_inlet_area_mm2": 3534.226,
+    "discharge_outlet_area_mm2": 5437.271,
+    "discharge_area_ratio": 1.5385,
+    "discharge_velocity_ratio": 0.65,
+    "discharge_length_mm": 104.348,
+    "discharge_outlet_width_mm": 28.036,
+    "discharge_outlet_height_mm": 193.939,
+    "discharge_cone_angle_deg": 3.9797,
+    "discharge_max_cone_angle_deg": 7.379,
+    "outlet_extension_length_mm": 97.98
+  },
+  "cfd_domain": {
+    "scope": "Closed rotating impeller fluid volume plus a connected stationary single-volute, cutwater, discharge diffuser and outlet extension.",
+    "definition": {
+      "inlet_extension_length_mm": 29.225,
+      "inlet_plane_z_mm": 87.365,
+      "impeller_outlet_radius_mm": 89.15,
+      "stationary_inlet_radius_mm": 96.3015,
+      "rsi_radius_mm": 92.7258,
+      "rotor_extension_length_mm": 3.5757,
+      "stationary_connection_length_mm": 3.5757,
+      "rotor_outlet_width_mm": 21.9,
+      "stationary_inlet_width_mm": 24.379,
+      "rsi_area_mm2": 12759.2262,
+      "interface_shape": "cylindrical, r = constant",
+      "interface_method": "mid-gap virtual extension",
+      "source": "CFturbo_en.pdf pp. 595-600",
+      "stationary_domain_type": "single volute with tangential discharge diffuser",
+      "stationary_outlet_center_mm": [
+        205.6774,
+        169.1828,
+        18.838
+      ],
+      "stationary_outlet_normal": [
+        0.17364818,
+        0.98480775,
+        0.0
+      ]
+    },
+    "rotating_volume_file": "rotating_flow_domain.stl",
+    "stationary_domain_file": "stationary_volute_flow_domain.stl",
+    "interface_pair": {
+      "name": "rotor_stator_interface_1",
+      "method": "cyclicAMI",
+      "rotating_patch": "rotor_rsi",
+      "stationary_patch": "stationary_rsi",
+      "geometric_match": "shared cylindrical surface"
+    },
+    "boundary_patches": {
+      "rotor_inlet": {
+        "file": "rotor_inlet.stl",
+        "frame": "rotating domain",
+        "suggested_type": "patch"
+      },
+      "rotor_rsi": {
+        "file": "rotor_rsi.stl",
+        "frame": "rotating domain",
+        "suggested_type": "cyclicAMI"
+      },
+      "rotor_walls": {
+        "file": "rotor_walls.stl",
+        "frame": "rotating domain",
+        "suggested_type": "wall"
+      },
+      "stationary_rsi": {
+        "file": "stationary_rsi.stl",
+        "frame": "stationary domain",
+        "suggested_type": "cyclicAMI"
+      },
+      "stationary_outlet": {
+        "file": "stationary_outlet.stl",
+        "frame": "stationary domain",
+        "suggested_type": "patch"
+      },
+      "stationary_walls": {
+        "file": "stationary_walls.stl",
+        "frame": "stationary domain",
+        "suggested_type": "wall"
+      }
+    },
+    "limitations": [
+      "No mesh, OpenFOAM dictionaries, or solved CFD results are included.",
+      "Leakage and secondary shroud-side flow paths are omitted."
+    ]
+  },
+  "pump_architecture": {
+    "machine_configuration": "Single stage",
+    "stage_count": 1,
+    "stage_head_fractions": [
+      1.0
+    ],
+    "requested_flow_type": "Auto",
+    "resolved_flow_types": [
+      "Radial"
+    ],
+    "single_stage_collector": "Volute",
+    "interstage_return_type": "Radial return channel",
+    "final_collector": "Volute",
+    "component_sequence": [
+      "Inlet",
+      "Impeller 1 (Radial)",
+      "Vaneless rotor-stator gap",
+      "Volute",
+      "Cutwater",
+      "Discharge diffuser"
+    ],
+    "cad_scope": "Radial impeller plus single-volute, compensated cutwater, and tangential discharge-diffuser material CAD; connected rotating and stationary fluid-domain export with a cylindrical RSI is supported.",
+    "complete_assembly_cad": true
+  },
+  "meridional_geometry": {
+    "curve_type": "Bezier order 4",
+    "axial_length": 53.32,
+    "hub_control_points_rz": [
+      [
+        20.15,
+        53.32
+      ],
+      [
+        20.15,
+        41.5896
+      ],
+      [
+        49.82,
+        25.0604
+      ],
+      [
+        80.4974,
+        0.0
+      ],
+      [
+        89.15,
+        0.0
+      ]
+    ],
+    "shroud_control_points_rz": [
+      [
+        58.45,
+        53.32
+      ],
+      [
+        58.45,
+        46.4076
+      ],
+      [
+        70.116,
+        36.9816
+      ],
+      [
+        84.5818,
+        21.9
+      ],
+      [
+        89.15,
+        21.9
+      ]
+    ],
+    "leading_edge_hub_fraction": 0.319,
+    "leading_edge_shroud_fraction": 0.1145,
+    "trailing_edge_hub_fraction": 1.0,
+    "trailing_edge_shroud_fraction": 1.0,
+    "inlet_area_mm2": 9457.388,
+    "outlet_area_mm2": 12267.197,
+    "area_ratio_outlet_to_inlet": 1.2971,
+    "minimum_channel_height_mm": 21.9,
+    "area_uniformity_ratio": 1.1079,
+    "minimum_hub_curvature_radius_mm": 4.674,
+    "minimum_shroud_curvature_radius_mm": 2.124,
+    "hub_static_moment_mm2": 4614.522,
+    "shroud_static_moment_mm2": 3238.532,
+    "static_moment_imbalance_percent": 35.043
+  },
+  "blade_edge_geometry": {
+    "leading_shape": "Ellipse",
+    "trailing_shape": "Ellipse",
+    "leading_radius_mm": 0.75,
+    "trailing_radius_mm": 0.75,
+    "axis_ratio": 1.0
+  },
+  "blade_passage_validation": {
+    "method": "Sampled periodic pressure/suction polyline clearance with spanwise normal-gap area integration",
+    "sample_span_count": 5,
+    "sample_chord_count": 41,
+    "minimum_throat_distance_mm": 13.1012,
+    "minimum_throat_span_fraction": 1.0,
+    "minimum_throat_chord_fraction": 0.0,
+    "leading_edge_throat_distances_mm": [
+      15.7713,
+      15.5849,
+      14.976,
+      14.1144,
+      13.1012
+    ],
+    "trailing_edge_throat_distances_mm": [
+      32.8171,
+      31.4542,
+      30.0761,
+      28.6302,
+      27.0674
+    ],
+    "throat_area_mm2": 417.115,
+    "throat_area_chord_fraction": 0.3,
+    "passage_area_min_mm2": 417.115,
+    "passage_area_max_mm2": 1157.497,
+    "passage_area_uniformity_ratio": 2.775,
+    "maximum_adjacent_area_change_percent": 4.8306,
+    "passage_areas_mm2": [
+      424.295,
+      428.808,
+      436.02,
+      445.891,
+      458.393,
+      470.967,
+      481.203,
+      482.848,
+      479.425,
+      469.076,
+      448.612,
+      427.227,
+      417.115,
+      417.165,
+      426.231,
+      440.527,
+      458.526,
+      477.957,
+      499.272,
+      522.409,
+      546.558,
+      572.086,
+      599.721,
+      628.01,
+      657.752,
+      688.907,
+      720.39,
+      753.659,
+      786.63,
+      821.101,
+      854.862,
+      889.601,
+      923.556,
+      957.132,
+      990.395,
+      1022.011,
+      1052.739,
+      1082.231,
+      1109.734,
+      1135.162,
+      1157.497
+    ],
+    "sampled_intersection_free": true
+  },
+  "exact_neighbor_cad_overlap_validation": false,
+  "engineering_record": "engineering_record.json",
+  "engineering_check_summary": {
+    "pass": 33,
+    "warning": 3,
+    "fail": 0
+  },
+  "warning": "The complete preliminary single-stage volute fluid domain is included; mesh, boundary-condition dictionaries, and solved CFD remain pending."
+}
