@@ -85,7 +85,7 @@ run:
 ```powershell
 pumpai evaluate examples/design_001.yaml --backend wsl `
   --wsl-distribution Ubuntu `
-  --openfoam-bashrc /path/to/OpenFOAM-v2312/etc/bashrc
+  --openfoam-bashrc /usr/lib/openfoam/openfoam2606/etc/bashrc
 ```
 
 The default output is `output/<requirements-file-stem>`. Each OpenFOAM command

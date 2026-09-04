@@ -128,7 +128,7 @@ class OpenFoamRunnerTests(unittest.TestCase):
 
             def executor(command, cwd, timeout):
                 executable = " ".join(command)
-                if "foamVersion" in executable:
+                if "WM_PROJECT_VERSION" in executable:
                     return ProcessResult(0, "OpenFOAM-v2312\n")
                 if "checkMesh" in executable:
                     return ProcessResult(0, CHECK_MESH_LOG)

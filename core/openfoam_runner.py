@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 RESULT_SCHEMA_VERSION = 1
 OPENFOAM_STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("foamVersion", ("foamVersion",)),
+    ("foamVersion", ("printenv", "WM_PROJECT_VERSION")),
     ("surfaceFeatureExtract", ("surfaceFeatureExtract",)),
     ("blockMesh", ("blockMesh",)),
     ("snappyHexMesh", ("snappyHexMesh", "-overwrite")),
