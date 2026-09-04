@@ -651,12 +651,22 @@ def _volute_discharge_volume(
     inlet_height = inlet_outer - inlet_inner
     diffuser_length = volute.discharge_length_mm
     total_length = diffuser_length + volute.outlet_extension_length_mm
+    # CFturbo requires the spiral and diffuser to intersect for cut-water
+    # construction (pp. 679-680).  Starting on the coincident end section is
+    # numerically fragile in OCCT, so extend only the inlet end of the loft into
+    # the spiral.  The hydraulic diffuser length and outlet location stay fixed.
+    interface_overlap_mm = min(
+        0.15 * diffuser_length,
+        max(5.0, 0.10 * inlet_height),
+    )
     section_count = 13
     wires: list[cq.Wire] = []
     for index in range(section_count + 1):
         if index < section_count:
             fraction = index / (section_count - 1.0)
-            distance = diffuser_length * fraction
+            distance = -interface_overlap_mm + (
+                diffuser_length + interface_overlap_mm
+            ) * fraction
             height = inlet_height + fraction * (
                 volute.discharge_outlet_height_mm - inlet_height
             )

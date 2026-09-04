@@ -1,0 +1,9 @@
+requirements:
+  head_m: 45.0
+  discharge_m3_h: 120.0
+  rpm: 2950.0
+  liquid_type: Water
+  temperature_c: 25.0
+  impeller_configuration: Closed
+  stage_count: 1
+  single_stage_collector: Volute

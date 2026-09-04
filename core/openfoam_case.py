@@ -409,7 +409,8 @@ RAS
 
 
 def _system_files(design: "CompletePumpDesign", bounds: CaseBounds) -> dict[str, str]:
-    control = _foam_header("controlDict") + """application     simpleFoam;
+    density = design.fluid.density
+    control = _foam_header("controlDict") + f"""application     simpleFoam;
 startFrom       startTime;
 startTime       0;
 stopAt          endTime;
@@ -424,6 +425,96 @@ writeCompression off;
 timeFormat      general;
 timePrecision   6;
 runTimeModifiable true;
+
+functions
+{{
+    totalPressure
+    {{
+        type            pressure;
+        libs            (fieldFunctionObjects);
+        mode            total;
+        p               p;
+        U               U;
+        rho             rhoInf;
+        rhoInf          {density:.9g};
+        result          pTotal;
+        executeControl  timeStep;
+        executeInterval 1;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    inletTotalPressure
+    {{
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        fields          (pTotal);
+        operation       areaAverage;
+        regionType      patch;
+        name            rotor_inlet;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    outletTotalPressure
+    {{
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        fields          (pTotal);
+        operation       areaAverage;
+        regionType      patch;
+        name            stationary_outlet;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    inletFlow
+    {{
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        fields          (phi);
+        operation       sum;
+        regionType      patch;
+        name            rotor_inlet;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    outletFlow
+    {{
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        fields          (phi);
+        operation       sum;
+        regionType      patch;
+        name            stationary_outlet;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    rotorForces
+    {{
+        type            forces;
+        libs            ("libforces.so");
+        patches         (rotor_walls);
+        rho             rhoInf;
+        rhoInf          {density:.9g};
+        pRef            0;
+        CofR            (0 0 0);
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+
+    convergenceHistory
+    {{
+        type            solverInfo;
+        libs            ("libutilityFunctionObjects.so");
+        fields          (U p k omega);
+        writeResidualFields no;
+        writeControl    timeStep;
+        writeInterval   10;
+    }}
+}}
 """
     schemes = _foam_header("fvSchemes") + """ddtSchemes { default steadyState; }
 gradSchemes { default cellLimited Gauss linear 1; }
@@ -592,6 +683,7 @@ rm -f constant/triSurface/*.eMesh constant/triSurface/*.obj
         "turbulence_model": "kOmegaSST",
         "operating_point": {
             "flow_m3_s": q,
+            "target_head_m": design.requirements.head_m,
             "rpm": design.requirements.rpm,
             "omega_rad_s": 2.0 * math.pi * design.requirements.rpm / 60.0,
             "kinematic_viscosity_m2_s": design.fluid.kinematic_viscosity,

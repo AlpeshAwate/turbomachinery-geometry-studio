@@ -937,6 +937,7 @@ def _size_single_stage(req: PumpRequirements) -> CompletePumpDesign:
             target_epsilon - index / 4.0 * (target_epsilon - 0.05)
             for index in range(5)
         )
+        epsilon_step = max(1.0e-6, (target_epsilon - 0.05) / 4.0)
         width_values = sorted(
             {
                 0.04,
@@ -1012,16 +1013,24 @@ def _size_single_stage(req: PumpRequirements) -> CompletePumpDesign:
                             (diameter + inlet_mean)
                             / max(0.01, diameter - inlet_mean)
                         ) * math.sin(mean_angle)
+                        # Normalize unlike quantities before ranking.  The old
+                        # raw-unit weights let advisory cm2/cm1 and deviation
+                        # ranges overwhelm the nq-dependent CFturbo targets,
+                        # collapsing the eye and b2 for published low-nq pumps.
+                        # Range exceedances remain visible engineering warnings
+                        # below; they are not silently redefined here.
                         range_penalty = (
-                            max(0.0, 0.60 - deceleration_candidate) * 90.0
-                            + max(0.0, deceleration_candidate - 0.95) * 50.0
-                            + max(0.0, deviation_candidate - 14.0) * 8.0
+                            max(0.0, 0.60 - deceleration_candidate) / 0.35
+                            + max(0.0, deceleration_candidate - 0.95) / 0.35
+                            + max(0.0, deviation_candidate - 14.0) / 14.0
                         )
                         preference_penalty = (
-                            3.0 * abs(width_ratio - target_width_ratio)
-                            + 0.2 * abs(beta2_candidate - target_beta2)
+                            abs(width_ratio - target_width_ratio) / 0.015
+                            + abs(beta2_candidate - target_beta2) / 2.0
                             + 0.25 * abs(blades - pfleiderer_count)
-                            + 2.0 * abs(epsilon - target_epsilon)
+                            + 2.0
+                            * abs(epsilon - target_epsilon)
+                            / epsilon_step
                         )
                         candidates.append(
                             (
@@ -1836,6 +1845,10 @@ def _size_single_stage(req: PumpRequirements) -> CompletePumpDesign:
             "blade_passage_validation": blade_passage.method,
             "npshr": "suction-specific-speed estimate, S=210 metric",
             "rotor_stator_count": "CFturbo low-order periodicity penalty",
+            "impeller_candidate_selection": (
+                "Normalized deviations from nq-dependent preliminary targets plus "
+                "normalized advisory-range exceedance; exceptions remain warnings"
+            ),
             "volute_spiral": (
                 "Pfleiderer cu*r^1=constant with angular internal-flow accumulation"
             ),

@@ -27,8 +27,10 @@ interface, stationary annular inlet, flow-sized spiral, compensated cutwater,
 tangential discharge diffuser, outlet extension, and named boundary patches.
 The exporter also creates a first-pass single-region steady-MRF OpenFOAM case
 with `blockMesh`, `surfaceFeatureExtract`, `snappyHexMesh`, a cylindrical rotor
-cell zone, k-omega SST fields, solver controls, and run scripts. It remains a
-screening setup: final geometry must be checked with detailed loss modelling,
+cell zone, k-omega SST fields, solver controls, and run scripts. The command-line
+runner can execute that case locally or through WSL and rejects incomplete or
+non-physical results. It remains a screening setup: final geometry must be
+checked with detailed loss modelling,
 stress analysis, manufacturability review, mesh/y+ independence studies,
 transient CFD where needed, and experimental validation.
 
@@ -44,6 +46,7 @@ Use 64-bit Python 3.11:
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 Run the GUI:
@@ -59,6 +62,39 @@ default geometry package can be generated with:
 python impeller_generator.py
 ```
 
+## Automated geometry and CFD workflow
+
+Pump requirements can be supplied as YAML or JSON. A starting file is provided
+at `examples/design_001.yaml`.
+
+Generate geometry and the OpenFOAM case without running the solver:
+
+```powershell
+python impeller_generator.py export examples/design_001.yaml
+```
+
+Generate, mesh, solve, and evaluate in a sourced Linux OpenFOAM environment:
+
+```sh
+pumpai evaluate examples/design_001.yaml --backend local
+```
+
+On Windows, install a WSL distribution and OpenCFD OpenFOAM v2312 or newer, then
+run:
+
+```powershell
+pumpai evaluate examples/design_001.yaml --backend wsl `
+  --wsl-distribution Ubuntu `
+  --openfoam-bashrc /path/to/OpenFOAM-v2312/etc/bashrc
+```
+
+The default output is `output/<requirements-file-stem>`. Each OpenFOAM command
+writes a log under `openfoam_steady_mrf/logs`. The final
+`simulation_result.json` records the design ID, case-manifest hash, mesh and
+convergence evidence, flow closure, pressure rise, head, torque, power,
+efficiency, and every acceptance gate. A failed gate returns process exit code
+2; solver completion alone is not treated as a valid result.
+
 ## Output units and validation
 
 - Internal CadQuery geometry and STEP files use millimetres.
@@ -70,6 +106,8 @@ python impeller_generator.py
 - `openfoam_steady_mrf/case_manifest.json` records the generated solver target,
   mesh envelope, MRF zone, included external patches, deliberately excluded RSI
   surfaces, and current CFD limitations.
+- `openfoam_steady_mrf/simulation_result.json` records a versioned CFD result
+  and fail-closed acceptance gates after `pumpai evaluate`.
 - `engineering_record.json` records the reproducible design evidence and checks.
 
 Material STEP/STL and CFD fluid-domain STEP/STL are exported as distinct files.
@@ -77,10 +115,10 @@ For a single-stage volute, the fluid volumes and inlet/RSI/outlet/wall patches
 are constructed. The generated steady-MRF case uses one continuous fluid mesh,
 so the matching `rotor_rsi` and `stationary_rsi` surfaces are intentionally not
 included in `snappyHexMesh`; they are retained in the parent geometry package
-for the later transient cyclic-AMI workflow. OpenFOAM itself is not bundled and
-the case still has to be meshed, checked, solved, and independently validated on
-a Linux/WSL or remote OpenFOAM installation. Other stationary architectures
-remain partial.
+for the later transient cyclic-AMI workflow. OpenFOAM itself is not bundled;
+`pumpai evaluate` requires a Linux/WSL OpenFOAM installation, and accepted
+screening results still require mesh/y+ independence before engineering release.
+Other stationary architectures remain partial.
 
 The meridional passage is smooth and parameterized. Impeller blades now use a
 five-span free-form mean surface with local inlet-angle variation, smooth

@@ -43,6 +43,19 @@ class ResearchBenchmarkTests(unittest.TestCase):
         self.assertLessEqual(impeller.blade_count_z, 7)
         self.assertGreaterEqual(impeller.outlet_width_ratio_b2_d2, 0.04)
 
+    def test_jia_low_specific_speed_exceptions_remain_explicit_warnings(self):
+        checks = {
+            check.key.split(".")[-1]: check
+            for check in self.jia.engineering_record.checks
+        }
+        deceleration = checks["meridional_deceleration"]
+        deviation = checks["outlet_deviation"]
+        self.assertEqual(deceleration.status, "warning")
+        self.assertEqual(deceleration.lower_limit, 0.60)
+        self.assertEqual(deceleration.upper_limit, 0.95)
+        self.assertEqual(deviation.status, "warning")
+        self.assertEqual(deviation.upper_limit, 14.0)
+
     def test_aliuly_main_dimensions_and_angles_stay_within_preliminary_accuracy(self):
         impeller = self.aliuly.impeller
         self.assertLess(relative_error(impeller.suction_diameter_ds, 190.0), 0.08)

@@ -67,6 +67,7 @@ class OpenFoamCaseTests(unittest.TestCase):
                 "system/blockMeshDict",
                 "system/snappyHexMeshDict",
                 "system/topoSetDict",
+                "system/controlDict",
                 "Allrun",
                 "case_manifest.json",
             ):
@@ -91,9 +92,20 @@ class OpenFoamCaseTests(unittest.TestCase):
                 snappy = stream.read()
             self.assertNotIn("rotor_rsi", snappy)
             self.assertNotIn("stationary_rsi", snappy)
+            with open(
+                os.path.join(case_dir, "system", "controlDict"),
+                encoding="utf-8",
+            ) as stream:
+                control = stream.read()
+            self.assertIn("type            pressure", control)
+            self.assertIn("name            rotor_inlet", control)
+            self.assertIn("name            stationary_outlet", control)
+            self.assertIn("patches         (rotor_walls)", control)
+            self.assertIn("type            solverInfo", control)
             with open(result["manifest_path"], encoding="utf-8") as stream:
                 manifest = json.load(stream)
             self.assertEqual(manifest["preflight"]["stl_coordinate_unit"], "m")
+            self.assertEqual(manifest["operating_point"]["target_head_m"], 45.0)
 
     def test_missing_required_patch_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
