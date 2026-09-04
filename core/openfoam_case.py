@@ -237,7 +237,7 @@ snapControls
     multiRegionFeatureSnap false;
 }}
 
-addLayerControls
+addLayersControls
 {{
     relativeSizes true;
     layers {{}}
@@ -450,6 +450,7 @@ functions
         libs            (fieldFunctionObjects);
         fields          (pTotal);
         operation       areaAverage;
+        writeFields     false;
         regionType      patch;
         name            rotor_inlet;
         writeControl    timeStep;
@@ -462,6 +463,7 @@ functions
         libs            (fieldFunctionObjects);
         fields          (pTotal);
         operation       areaAverage;
+        writeFields     false;
         regionType      patch;
         name            stationary_outlet;
         writeControl    timeStep;
@@ -474,6 +476,7 @@ functions
         libs            (fieldFunctionObjects);
         fields          (phi);
         operation       sum;
+        writeFields     false;
         regionType      patch;
         name            rotor_inlet;
         writeControl    timeStep;
@@ -486,6 +489,7 @@ functions
         libs            (fieldFunctionObjects);
         fields          (phi);
         operation       sum;
+        writeFields     false;
         regionType      patch;
         name            stationary_outlet;
         writeControl    timeStep;

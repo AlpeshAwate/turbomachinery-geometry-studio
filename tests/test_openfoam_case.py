@@ -92,12 +92,15 @@ class OpenFoamCaseTests(unittest.TestCase):
                 snappy = stream.read()
             self.assertNotIn("rotor_rsi", snappy)
             self.assertNotIn("stationary_rsi", snappy)
+            self.assertIn("addLayersControls", snappy)
+            self.assertNotIn("addLayerControls\n", snappy)
             with open(
                 os.path.join(case_dir, "system", "controlDict"),
                 encoding="utf-8",
             ) as stream:
                 control = stream.read()
             self.assertIn("type            pressure", control)
+            self.assertEqual(control.count("writeFields     false;"), 4)
             self.assertIn("name            rotor_inlet", control)
             self.assertIn("name            stationary_outlet", control)
             self.assertIn("patches         (rotor_walls)", control)

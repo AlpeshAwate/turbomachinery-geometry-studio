@@ -166,6 +166,42 @@ class OpenFoamRunnerTests(unittest.TestCase):
                 os.path.isfile(os.path.join(case_dir, "simulation_result.json"))
             )
 
+    def test_wsl_backend_stages_case_in_space_free_runtime_directory(self):
+        with tempfile.TemporaryDirectory(prefix="pumpai case ") as case_dir:
+            self._write_manifest(case_dir)
+            self._write_complete_outputs(case_dir)
+            observed_commands = []
+
+            def executor(command, cwd, timeout):
+                executable = " ".join(command)
+                observed_commands.append(executable)
+                if "WM_PROJECT_VERSION" in executable:
+                    return ProcessResult(0, "OpenFOAM-v2606\n")
+                if "checkMesh" in executable:
+                    return ProcessResult(0, CHECK_MESH_LOG)
+                if "simpleFoam" in executable:
+                    return ProcessResult(0, SOLVER_LOG)
+                return ProcessResult(0, "")
+
+            result = evaluate_openfoam_case(
+                self.design,
+                case_dir,
+                backend="wsl",
+                wsl_distribution="Ubuntu",
+                openfoam_bashrc="/opt/openfoam/etc/bashrc",
+                executor=executor,
+            )
+
+            self.assertEqual(result["status"], "passed")
+            self.assertTrue(result["wsl_case_staged"])
+            self.assertEqual(result["commands"][0]["step"], "wsl_stage")
+            self.assertEqual(result["commands"][-1]["step"], "wsl_sync")
+            solver_command = next(
+                command for command in observed_commands if "surfaceFeatureExtract" in command
+            )
+            self.assertIn("cd /tmp/pumpai-case-", solver_command)
+            self.assertNotIn(case_dir, solver_command)
+
 
 if __name__ == "__main__":
     unittest.main()

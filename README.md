@@ -88,6 +88,12 @@ pumpai evaluate examples/design_001.yaml --backend wsl `
   --openfoam-bashrc /usr/lib/openfoam/openfoam2606/etc/bashrc
 ```
 
+For WSL execution, the runner automatically stages each case under a temporary
+Linux path without spaces and copies the mesh, solver times, post-processing
+data, and logs back afterward. This is required because OpenFOAM rejects case
+working-directory names containing spaces, which are common in Windows project
+paths.
+
 The default output is `output/<requirements-file-stem>`. Each OpenFOAM command
 writes a log under `openfoam_steady_mrf/logs`. The final
 `simulation_result.json` records the design ID, case-manifest hash, mesh and

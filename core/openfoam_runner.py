@@ -122,6 +122,49 @@ def _command_for_backend(
     return command
 
 
+def _wsl_shell_command(shell_command: str, wsl_distribution: str | None) -> list[str]:
+    command = ["wsl.exe"]
+    if wsl_distribution:
+        command.extend(("--distribution", wsl_distribution))
+    command.extend(("--", "bash", "-lc", shell_command))
+    return command
+
+
+def _wsl_runtime_case_path(case_dir: str) -> str:
+    """Return a unique, OpenFOAM-safe WSL path without spaces."""
+
+    seed = f"{os.path.abspath(case_dir)}:{os.getpid()}:{_utc_now()}"
+    token = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return f"/tmp/pumpai-case-{token}"
+
+
+def _wsl_stage_command(
+    case_dir: str, runtime_case: str, wsl_distribution: str | None
+) -> list[str]:
+    source_case = _windows_path_to_wsl(case_dir)
+    shell_command = (
+        f"mkdir -p -- {shlex.quote(runtime_case)} && "
+        f"cp -r -- {shlex.quote(source_case + '/.')} "
+        f"{shlex.quote(runtime_case + '/')}"
+    )
+    return _wsl_shell_command(shell_command, wsl_distribution)
+
+
+def _wsl_sync_command(
+    case_dir: str, runtime_case: str, wsl_distribution: str | None
+) -> list[str]:
+    destination_case = _windows_path_to_wsl(case_dir)
+    runtime = shlex.quote(runtime_case)
+    shell_command = (
+        f"cp -r -- {shlex.quote(runtime_case + '/.')} "
+        f"{shlex.quote(destination_case + '/')} ; "
+        "copy_status=$?; "
+        f"rm -rf -- {runtime}; "
+        "exit $copy_status"
+    )
+    return _wsl_shell_command(shell_command, wsl_distribution)
+
+
 def resolve_backend(backend: str) -> str:
     normalized = backend.lower()
     if normalized not in {"auto", "local", "wsl"}:
@@ -474,15 +517,13 @@ def evaluate_openfoam_case(
     os.makedirs(log_dir, exist_ok=True)
     commands: list[dict] = []
     version_gate: dict | None = None
+    sync_gate: dict | None = None
     execution_gate = _gate(
         "openfoam_execution", True, "No OpenFOAM command returned an error."
     )
     started_at = _utc_now()
 
-    for step_name, argv in OPENFOAM_STEPS:
-        command = _command_for_backend(
-            argv, case_dir, selected_backend, wsl_distribution, openfoam_bashrc
-        )
+    def execute_and_record(step_name: str, command: Sequence[str]) -> tuple[int, str]:
         try:
             process = run(command, case_dir, timeout_s)
             combined = process.stdout
@@ -499,22 +540,54 @@ def evaluate_openfoam_case(
         commands.append(
             {
                 "step": step_name,
-                "command": command,
+                "command": list(command),
                 "return_code": returncode,
                 "log": os.path.relpath(log_path, case_dir).replace("\\", "/"),
             }
         )
+        return returncode, combined
+
+    execution_case_dir = case_dir
+    wsl_runtime_case: str | None = None
+    if selected_backend == "wsl":
+        # OpenFOAM v2606 rejects a case cwd containing spaces. Windows project
+        # directories commonly contain them, so run from a private WSL copy
+        # and copy all generated mesh, time, and post-processing data back.
+        wsl_runtime_case = _wsl_runtime_case_path(case_dir)
+        stage_command = _wsl_stage_command(
+            case_dir, wsl_runtime_case, wsl_distribution
+        )
+        returncode, _combined = execute_and_record("wsl_stage", stage_command)
         if returncode != 0:
-            hint = (
-                "Install a WSL distribution and OpenCFD OpenFOAM v2312+, then pass "
-                "--openfoam-bashrc when it is not sourced automatically."
-                if selected_backend == "wsl"
-                else "Source an OpenCFD OpenFOAM v2312+ environment or pass --openfoam-bashrc."
+            execution_gate = _gate(
+                "openfoam_execution",
+                False,
+                "Could not stage the OpenFOAM case in WSL. Inspect logs/wsl_stage.log.",
+                observed={"failed_step": "wsl_stage", "return_code": returncode},
+            )
+        else:
+            execution_case_dir = wsl_runtime_case
+
+    for step_name, argv in OPENFOAM_STEPS if execution_gate["status"] == "pass" else ():
+        command = _command_for_backend(
+            argv,
+            execution_case_dir,
+            selected_backend,
+            wsl_distribution,
+            openfoam_bashrc,
+        )
+        returncode, combined = execute_and_record(step_name, command)
+        if returncode != 0:
+            environment_hint = (
+                "Install OpenCFD OpenFOAM v2312+ and select its bashrc."
+                if step_name == "foamVersion"
+                else f"Inspect logs/{step_name}.log for the OpenFOAM error."
             )
             execution_gate = _gate(
                 "openfoam_execution",
                 False,
-                f"{step_name} failed with return code {returncode}. {hint}",
+                f"{step_name} failed with return code {returncode}. "
+                f"{environment_hint}",
                 observed={"failed_step": step_name, "return_code": returncode},
             )
             break
@@ -530,11 +603,27 @@ def evaluate_openfoam_case(
             if version_gate["status"] == "fail":
                 break
 
+    if wsl_runtime_case is not None and commands[0]["return_code"] == 0:
+        sync_command = _wsl_sync_command(
+            case_dir, wsl_runtime_case, wsl_distribution
+        )
+        sync_returncode, _combined = execute_and_record("wsl_sync", sync_command)
+        if sync_returncode != 0:
+            sync_gate = _gate(
+                "wsl_case_sync",
+                False,
+                "OpenFOAM ran in WSL, but its generated files could not be copied "
+                "back to the Windows case directory. Inspect logs/wsl_sync.log.",
+                observed={"return_code": sync_returncode},
+            )
+
     analysis = {"mesh": {}, "solver": {}, "performance": {}}
     gates = [execution_gate]
     if version_gate is not None:
         gates.append(version_gate)
-    if execution_gate["status"] == "pass" and (
+    if sync_gate is not None:
+        gates.append(sync_gate)
+    if execution_gate["status"] == "pass" and sync_gate is None and (
         version_gate is None or version_gate["status"] == "pass"
     ):
         final_mesh_path = os.path.join(log_dir, "checkMesh_final.log")
@@ -557,6 +646,7 @@ def evaluate_openfoam_case(
         "completed_at_utc": _utc_now(),
         "case_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "backend": selected_backend,
+        "wsl_case_staged": selected_backend == "wsl",
         "thresholds": asdict(thresholds),
         "commands": commands,
         **analysis,

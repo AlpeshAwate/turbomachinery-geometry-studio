@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turbomachinery-geometry-studio"
-version = "0.5.0"
+version = "0.5.1"
 description = "Preliminary centrifugal-pump sizing and validated CAD geometry generation"
 readme = "README.md"
 requires-python = ">=3.11"

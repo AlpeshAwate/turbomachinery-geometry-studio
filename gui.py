@@ -304,6 +304,9 @@ class CfdEvaluationWorker(QThread):
         """Run one solver command with bounded memory and responsive cancellation."""
 
         self.log.emit(f"\n$ {subprocess.list2cmdline(list(command))}")
+        # A cancelled WSL solve still needs the runner's final copy-back and
+        # scratch cleanup command to complete.
+        is_wsl_sync = any("copy_status=$?" in str(part) for part in command)
         process = subprocess.Popen(
             list(command),
             cwd=cwd,
@@ -336,7 +339,7 @@ class CfdEvaluationWorker(QThread):
 
         try:
             while True:
-                if self._cancel_requested.is_set():
+                if self._cancel_requested.is_set() and not is_wsl_sync:
                     if process.poll() is None:
                         try:
                             process.kill()
@@ -368,7 +371,11 @@ class CfdEvaluationWorker(QThread):
             if pending:
                 self.log.emit("".join(pending).rstrip())
             returncode = process.wait()
-            stderr = "Cancelled by user." if self._cancel_requested.is_set() else ""
+            stderr = (
+                "Cancelled by user."
+                if self._cancel_requested.is_set() and not is_wsl_sync
+                else ""
+            )
             return ProcessResult(returncode, "".join(output), stderr)
         finally:
             with self._process_lock:
