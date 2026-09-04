@@ -95,6 +95,15 @@ convergence evidence, flow closure, pressure rise, head, torque, power,
 efficiency, and every acceptance gate. A failed gate returns process exit code
 2; solver completion alone is not treated as a valid result.
 
+The desktop application exposes the same workflow on its **CFD Evaluation**
+tab. Compute a current single-stage volute design, confirm the WSL distribution
+and OpenFOAM bashrc, choose an output directory, and click **Run CFD
+Evaluation**. Geometry export, meshing, `checkMesh`, and `simpleFoam` run in the
+background while command output streams into the log panel. The summary panel
+shows the measured head, pressure rise, efficiency, power, torque, mesh size,
+and pass/fail gate count. The active command can be cancelled, and **Open
+Results Folder** opens the case containing logs and `simulation_result.json`.
+
 ## Output units and validation
 
 - Internal CadQuery geometry and STEP files use millimetres.

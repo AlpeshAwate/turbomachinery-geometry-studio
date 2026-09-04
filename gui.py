@@ -1,6 +1,10 @@
 import os
 import sys
 import gc
+import queue
+import subprocess
+import threading
+import time
 
 # Force QtPy to use PySide6 consistently
 os.environ["QT_API"] = "pyside6"
@@ -16,10 +20,10 @@ from PySide6.QtWidgets import (
     QLabel, QSpinBox, QDoubleSpinBox, QComboBox, QPushButton, 
     QGroupBox, QFormLayout, QMessageBox, QProgressBar, QTabWidget,
     QCheckBox, QRadioButton, QButtonGroup, QScrollArea, QFileDialog,
-    QFrame
+    QFrame, QLineEdit, QPlainTextEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QFont, QColor
 
 from pyvistaqt import QtInteractor
 import pyvista as pv
@@ -50,7 +54,56 @@ from core.blade_builder import (
     export_turbomachinery_for_openfoam,
 )
 from core.meridional import create_meridional_design
+from core.openfoam_runner import ProcessResult, evaluate_openfoam_case
 from meridional_editor import MeridionalEditorDialog
+
+
+DEFAULT_OPENFOAM_BASHRC = "/usr/lib/openfoam/openfoam2606/etc/bashrc"
+
+
+def cfd_run_is_supported(design, export_impeller=True, export_diffuser=True):
+    """Return whether the current selection can create a complete CFD case."""
+
+    return bool(
+        design
+        and design.architecture
+        and design.architecture.has_complete_assembly_cad
+        and export_impeller
+        and export_diffuser
+    )
+
+
+def format_cfd_result_summary(result):
+    """Create a compact, copyable summary of a gated OpenFOAM result."""
+
+    status = str(result.get("status", "unknown")).upper()
+    design_id = result.get("design_id", "-")
+    mesh = result.get("mesh") or {}
+    performance = result.get("performance") or {}
+    gates = result.get("gates") or []
+    passed = sum(gate.get("status") == "pass" for gate in gates)
+    failed = [gate for gate in gates if gate.get("status") != "pass"]
+
+    def metric(name, suffix, decimals=3):
+        value = performance.get(name)
+        return "-" if value is None else f"{float(value):.{decimals}f} {suffix}".strip()
+
+    lines = [
+        f"CFD {status}",
+        f"Design: {design_id}",
+        f"Mesh: {mesh.get('cells', '-')} cells; {mesh.get('regions', '-')} region(s)",
+        f"Head: {metric('head_m', 'm')}",
+        f"Pressure rise: {metric('total_pressure_rise_pa', 'Pa', 1)}",
+        f"Hydraulic efficiency: {metric('hydraulic_efficiency_percent', '%', 2)}",
+        f"Shaft power: {metric('shaft_power_kw', 'kW')}",
+        f"Rotor torque: {metric('rotor_torque_z_n_m', 'N m')}",
+        f"Acceptance gates: {passed} passed, {len(failed)} failed",
+    ]
+    lines.extend(
+        f"FAIL {gate.get('name', 'unknown')}: {gate.get('message', '')}"
+        for gate in failed
+    )
+    return "\n".join(lines)
 
 
 def _export_preview_stl(model, path, tolerance=0.08, angular_tolerance=0.12):
@@ -208,6 +261,163 @@ class ExportWorker(QThread):
             self.error.emit(str(exc))
 
 
+class CfdEvaluationWorker(QThread):
+    """Export and solve a CFD case while streaming process output to the GUI."""
+
+    completed = Signal(object, object, str)
+    error = Signal(str)
+    cancelled = Signal(str)
+    progress = Signal(str)
+    log = Signal(str)
+
+    def __init__(
+        self,
+        design,
+        target_dir,
+        backend,
+        wsl_distribution,
+        openfoam_bashrc,
+        timeout_s,
+    ):
+        super().__init__()
+        self.design = design
+        self.target_dir = target_dir
+        self.backend = backend
+        self.wsl_distribution = wsl_distribution or None
+        self.openfoam_bashrc = openfoam_bashrc or None
+        self.timeout_s = timeout_s
+        self._cancel_requested = threading.Event()
+        self._process_lock = threading.Lock()
+        self._current_process = None
+
+    def cancel(self):
+        self._cancel_requested.set()
+        with self._process_lock:
+            process = self._current_process
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+    def _streaming_executor(self, command, cwd, timeout_s):
+        """Run one solver command with bounded memory and responsive cancellation."""
+
+        self.log.emit(f"\n$ {subprocess.list2cmdline(list(command))}")
+        process = subprocess.Popen(
+            list(command),
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        with self._process_lock:
+            self._current_process = process
+
+        output_queue = queue.Queue()
+        sentinel = object()
+
+        def read_output():
+            try:
+                for line in process.stdout:
+                    output_queue.put(line)
+            finally:
+                output_queue.put(sentinel)
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        deadline = time.monotonic() + timeout_s
+        output = []
+        pending = []
+        last_emit = time.monotonic()
+
+        try:
+            while True:
+                if self._cancel_requested.is_set():
+                    if process.poll() is None:
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
+                    raise subprocess.TimeoutExpired(
+                        list(command), timeout_s, output="".join(output)
+                    )
+                try:
+                    item = output_queue.get(timeout=min(0.2, remaining))
+                except queue.Empty:
+                    item = None
+                if item is sentinel:
+                    break
+                if item is not None:
+                    output.append(item)
+                    pending.append(item)
+                if pending and (
+                    len(pending) >= 20 or time.monotonic() - last_emit >= 0.25
+                ):
+                    self.log.emit("".join(pending).rstrip())
+                    pending.clear()
+                    last_emit = time.monotonic()
+            if pending:
+                self.log.emit("".join(pending).rstrip())
+            returncode = process.wait()
+            stderr = "Cancelled by user." if self._cancel_requested.is_set() else ""
+            return ProcessResult(returncode, "".join(output), stderr)
+        finally:
+            with self._process_lock:
+                self._current_process = None
+
+    def run(self):
+        case_dir = ""
+        try:
+            self.progress.emit("Exporting validated CAD and CFD flow domains...")
+            self.log.emit(
+                "Preparing a new geometry package. STEP stays in millimetres; "
+                "OpenFOAM STL geometry uses metres."
+            )
+            exported = export_turbomachinery_for_openfoam(
+                self.design,
+                self.target_dir,
+                export_impeller=True,
+                export_diffuser=True,
+            )
+            case_dir = exported.get("openfoam_case", "")
+            if not case_dir:
+                raise ValueError(
+                    "The selected architecture did not generate a complete OpenFOAM case."
+                )
+            if self._cancel_requested.is_set():
+                self.cancelled.emit(case_dir)
+                return
+
+            self.progress.emit("Running mesh generation and steady-MRF CFD screening...")
+            result = evaluate_openfoam_case(
+                self.design,
+                case_dir,
+                backend=self.backend,
+                wsl_distribution=self.wsl_distribution,
+                openfoam_bashrc=self.openfoam_bashrc,
+                timeout_s=self.timeout_s,
+                executor=self._streaming_executor,
+            )
+            if self._cancel_requested.is_set():
+                self.cancelled.emit(case_dir)
+            else:
+                self.completed.emit(result, exported, case_dir)
+        except Exception as exc:
+            if self._cancel_requested.is_set():
+                self.cancelled.emit(case_dir)
+            else:
+                self.error.emit(str(exc))
+
+
 class PumpStudioApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -222,6 +432,9 @@ class PumpStudioApp(QMainWindow):
         self.meridional_override = None
         self.worker = None
         self.export_worker = None
+        self.cfd_worker = None
+        self.last_cfd_case_dir = ""
+        self.cfd_output_uses_default = True
         self.design_is_stale = False
         self.inputs_changed_during_computation = False
         self.open_meridional_after_compute = False
@@ -470,6 +683,11 @@ class PumpStudioApp(QMainWindow):
         center_layout = QVBoxLayout(center_panel)
         center_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.workspace_tabs = QTabWidget(center_panel)
+        viewport_page = QWidget()
+        viewport_layout = QVBoxLayout(viewport_page)
+        viewport_layout.setContentsMargins(0, 0, 0, 0)
+
         # Viewport Toolbar
         toolbar = QWidget()
         tb_layout = QHBoxLayout(toolbar)
@@ -532,10 +750,10 @@ class PumpStudioApp(QMainWindow):
         self.btn_reset_cam.clicked.connect(self.reset_camera)
         tb_layout.addWidget(self.btn_reset_cam)
 
-        center_layout.addWidget(toolbar)
+        viewport_layout.addWidget(toolbar)
 
         # PyVistaQt 3D Viewport
-        self.plotter = QtInteractor(center_panel)
+        self.plotter = QtInteractor(viewport_page)
         self.plotter.set_background('#cfd4da', top='#f5f6f7')
         self.plotter.show_axes()
         try:
@@ -543,7 +761,105 @@ class PumpStudioApp(QMainWindow):
         except Exception:
             # Some older VTK/OpenGL combinations do not expose FXAA.
             pass
-        center_layout.addWidget(self.plotter.interactor, stretch=1)
+        viewport_layout.addWidget(self.plotter.interactor, stretch=1)
+        self.workspace_tabs.addTab(viewport_page, "3D CAD")
+
+        cfd_page = QWidget()
+        cfd_layout = QVBoxLayout(cfd_page)
+        cfd_layout.setContentsMargins(12, 12, 12, 12)
+
+        cfd_setup = QGroupBox("Automated steady-MRF screening")
+        cfd_form = QFormLayout(cfd_setup)
+        self.combo_cfd_backend = QComboBox()
+        self.combo_cfd_backend.addItem("Automatic", "auto")
+        self.combo_cfd_backend.addItem("WSL (Windows)", "wsl")
+        self.combo_cfd_backend.addItem("Local Linux", "local")
+        self.combo_cfd_backend.setCurrentIndex(1 if os.name == "nt" else 2)
+        self.combo_cfd_backend.currentIndexChanged.connect(
+            self._update_cfd_backend_controls
+        )
+        cfd_form.addRow("Execution backend:", self.combo_cfd_backend)
+
+        self.edit_cfd_distribution = QLineEdit("Ubuntu")
+        self.edit_cfd_distribution.setToolTip(
+            "WSL distribution containing the OpenFOAM installation."
+        )
+        cfd_form.addRow("WSL distribution:", self.edit_cfd_distribution)
+
+        self.edit_cfd_bashrc = QLineEdit(DEFAULT_OPENFOAM_BASHRC)
+        self.edit_cfd_bashrc.setToolTip(
+            "OpenFOAM environment script inside Linux/WSL."
+        )
+        cfd_form.addRow("OpenFOAM bashrc:", self.edit_cfd_bashrc)
+
+        output_row = QWidget()
+        output_layout = QHBoxLayout(output_row)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_cfd_output = QLineEdit(
+            os.path.join(SCRIPT_DIR, "output", "gui_cfd")
+        )
+        self.edit_cfd_output.textEdited.connect(self._mark_custom_cfd_output)
+        self.btn_browse_cfd_output = QPushButton("Browse...")
+        self.btn_browse_cfd_output.clicked.connect(self.browse_cfd_output)
+        output_layout.addWidget(self.edit_cfd_output, stretch=1)
+        output_layout.addWidget(self.btn_browse_cfd_output)
+        cfd_form.addRow("Output directory:", output_row)
+
+        self.spin_cfd_timeout_hours = QDoubleSpinBox()
+        self.spin_cfd_timeout_hours.setRange(0.1, 24.0)
+        self.spin_cfd_timeout_hours.setValue(2.0)
+        self.spin_cfd_timeout_hours.setDecimals(1)
+        self.spin_cfd_timeout_hours.setSuffix(" h per command")
+        cfd_form.addRow("Timeout:", self.spin_cfd_timeout_hours)
+        cfd_layout.addWidget(cfd_setup)
+
+        cfd_actions = QHBoxLayout()
+        self.btn_run_cfd = QPushButton("Run CFD Evaluation")
+        self.btn_run_cfd.setEnabled(False)
+        self.btn_run_cfd.setStyleSheet(
+            "QPushButton { background-color: #0284c7; color: white; "
+            "font-weight: bold; padding: 10px; border-radius: 5px; } "
+            "QPushButton:hover { background-color: #0369a1; } "
+            "QPushButton:disabled { background-color: #475569; color: #94a3b8; }"
+        )
+        self.btn_run_cfd.clicked.connect(self.start_cfd_evaluation)
+        self.btn_cancel_cfd = QPushButton("Cancel")
+        self.btn_cancel_cfd.setEnabled(False)
+        self.btn_cancel_cfd.clicked.connect(self.cancel_cfd_evaluation)
+        self.btn_open_cfd_folder = QPushButton("Open Results Folder")
+        self.btn_open_cfd_folder.setEnabled(False)
+        self.btn_open_cfd_folder.clicked.connect(self.open_cfd_results_folder)
+        cfd_actions.addWidget(self.btn_run_cfd)
+        cfd_actions.addWidget(self.btn_cancel_cfd)
+        cfd_actions.addWidget(self.btn_open_cfd_folder)
+        cfd_actions.addStretch()
+        cfd_layout.addLayout(cfd_actions)
+
+        self.lbl_cfd_status = QLabel(
+            "Compute a complete single-stage volute design to enable CFD evaluation."
+        )
+        self.lbl_cfd_status.setWordWrap(True)
+        self.lbl_cfd_status.setStyleSheet("color: #38bdf8; font-weight: bold;")
+        cfd_layout.addWidget(self.lbl_cfd_status)
+
+        self.cfd_summary = QPlainTextEdit()
+        self.cfd_summary.setReadOnly(True)
+        self.cfd_summary.setPlaceholderText(
+            "Mesh, convergence, pressure rise, head, power, efficiency, and "
+            "acceptance gates will appear here."
+        )
+        self.cfd_summary.setMaximumHeight(180)
+        cfd_layout.addWidget(self.cfd_summary)
+
+        self.cfd_log = QPlainTextEdit()
+        self.cfd_log.setReadOnly(True)
+        self.cfd_log.document().setMaximumBlockCount(5000)
+        self.cfd_log.setPlaceholderText("Live OpenFOAM command output will appear here.")
+        cfd_layout.addWidget(self.cfd_log, stretch=1)
+
+        self.workspace_tabs.addTab(cfd_page, "CFD Evaluation")
+        center_layout.addWidget(self.workspace_tabs)
+        self._update_cfd_backend_controls()
 
         root_layout.addWidget(center_panel, stretch=2)
 
@@ -730,6 +1046,11 @@ class PumpStudioApp(QMainWindow):
         self.meridional_override = None
         self.design_is_stale = True
         self.btn_export.setEnabled(False)
+        if hasattr(self, "btn_run_cfd"):
+            self.btn_run_cfd.setEnabled(False)
+            self.lbl_cfd_status.setText(
+                "Inputs changed. Regenerate the design before starting another CFD run."
+            )
         self.btn_edit_meridional.setEnabled(
             self.spin_stage_count.value() == 1
             and bool(self.cached_impeller_stl)
@@ -822,6 +1143,194 @@ class PumpStudioApp(QMainWindow):
             closed and self.chk_eye_collar.isChecked()
         )
 
+    def _update_cfd_backend_controls(self, _value=None):
+        backend = self.combo_cfd_backend.currentData()
+        uses_wsl = backend == "wsl" or (backend == "auto" and os.name == "nt")
+        self.edit_cfd_distribution.setEnabled(uses_wsl)
+
+    def _mark_custom_cfd_output(self, _text):
+        self.cfd_output_uses_default = False
+
+    def browse_cfd_output(self):
+        start_dir = self.edit_cfd_output.text().strip() or SCRIPT_DIR
+        target_dir = QFileDialog.getExistingDirectory(
+            self, "Select CFD Output Directory", start_dir
+        )
+        if target_dir:
+            self.cfd_output_uses_default = False
+            self.edit_cfd_output.setText(target_dir)
+
+    def _cfd_selection_is_supported(self):
+        return cfd_run_is_supported(
+            self.current_design,
+            self.chk_gen_impeller.isChecked(),
+            self.chk_gen_diffuser.isChecked(),
+        )
+
+    def _set_cfd_controls_enabled(self, enabled):
+        self.combo_cfd_backend.setEnabled(enabled)
+        self.edit_cfd_bashrc.setEnabled(enabled)
+        self.edit_cfd_output.setEnabled(enabled)
+        self.btn_browse_cfd_output.setEnabled(enabled)
+        self.spin_cfd_timeout_hours.setEnabled(enabled)
+        if enabled:
+            self._update_cfd_backend_controls()
+        else:
+            self.edit_cfd_distribution.setEnabled(False)
+
+    def _restore_actions_after_cfd(self):
+        self.progress_bar.setVisible(False)
+        self.btn_cancel_cfd.setEnabled(False)
+        self._set_cfd_controls_enabled(True)
+        self.btn_compute.setEnabled(True)
+        multistage = bool(
+            self.current_design
+            and self.current_design.architecture
+            and self.current_design.architecture.is_multistage
+        )
+        self.btn_export.setEnabled(
+            bool(self.current_design and not self.design_is_stale and not multistage)
+        )
+        self.btn_run_cfd.setEnabled(
+            bool(not self.design_is_stale and self._cfd_selection_is_supported())
+        )
+        self.btn_edit_meridional.setEnabled(
+            bool(
+                self.current_design
+                and self.spin_stage_count.value() == 1
+                and self.cached_impeller_stl
+                and self.chk_gen_impeller.isChecked()
+            )
+        )
+
+    def start_cfd_evaluation(self):
+        if self.current_design is None:
+            QMessageBox.warning(self, "No Design", "Please compute geometry first.")
+            return
+        if self.design_is_stale:
+            QMessageBox.warning(
+                self,
+                "Stale design",
+                "Regenerate the current inputs before running CFD.",
+            )
+            return
+        if not self._cfd_selection_is_supported():
+            QMessageBox.warning(
+                self,
+                "CFD case unavailable",
+                "Automated CFD currently requires a complete single-stage volute "
+                "assembly with both the impeller and volute selected.",
+            )
+            return
+        if self.cfd_worker is not None and self.cfd_worker.isRunning():
+            return
+
+        target_text = self.edit_cfd_output.text().strip()
+        if not target_text:
+            QMessageBox.warning(
+                self, "CFD output", "Select an output directory for the CFD run."
+            )
+            return
+        target_dir = os.path.abspath(target_text)
+
+        backend = self.combo_cfd_backend.currentData()
+        self.cfd_log.clear()
+        self.cfd_summary.clear()
+        self.last_cfd_case_dir = ""
+        self.btn_open_cfd_folder.setEnabled(False)
+        self.workspace_tabs.setCurrentIndex(1)
+        self.lbl_cfd_status.setText(
+            "Preparing geometry. This screening run can take a significant amount of time."
+        )
+        self.lbl_status.setText("Preparing automated CFD evaluation...")
+        self.progress_bar.setVisible(True)
+        self.btn_compute.setEnabled(False)
+        self.btn_export.setEnabled(False)
+        self.btn_run_cfd.setEnabled(False)
+        self.btn_edit_meridional.setEnabled(False)
+        self.btn_cancel_cfd.setEnabled(True)
+        self._set_cfd_controls_enabled(False)
+
+        self.cfd_worker = CfdEvaluationWorker(
+            self.current_design,
+            target_dir,
+            backend,
+            self.edit_cfd_distribution.text().strip(),
+            self.edit_cfd_bashrc.text().strip(),
+            self.spin_cfd_timeout_hours.value() * 3600.0,
+        )
+        self.cfd_worker.progress.connect(self.on_cfd_progress)
+        self.cfd_worker.log.connect(self.append_cfd_log)
+        self.cfd_worker.completed.connect(self.on_cfd_finished)
+        self.cfd_worker.error.connect(self.on_cfd_error)
+        self.cfd_worker.cancelled.connect(self.on_cfd_cancelled)
+        self.cfd_worker.start()
+
+    def on_cfd_progress(self, message):
+        self.lbl_cfd_status.setText(message)
+        self.lbl_status.setText(message)
+
+    def append_cfd_log(self, message):
+        if message:
+            self.cfd_log.appendPlainText(message.rstrip())
+
+    def cancel_cfd_evaluation(self):
+        if self.cfd_worker is None or not self.cfd_worker.isRunning():
+            return
+        self.btn_cancel_cfd.setEnabled(False)
+        self.lbl_cfd_status.setText("Cancellation requested; stopping the active command...")
+        self.cfd_worker.cancel()
+
+    def on_cfd_finished(self, result, _exported_files, case_dir):
+        self.last_cfd_case_dir = case_dir
+        self.btn_open_cfd_folder.setEnabled(bool(case_dir))
+        summary = format_cfd_result_summary(result)
+        self.cfd_summary.setPlainText(summary)
+        self.append_cfd_log("\n" + summary)
+        passed = result.get("status") == "passed"
+        self.lbl_cfd_status.setText(
+            "CFD evaluation passed every acceptance gate."
+            if passed
+            else "CFD completed, but one or more acceptance gates failed."
+        )
+        self.lbl_status.setText(
+            "CFD evaluation passed."
+            if passed
+            else "CFD evaluation finished with failed engineering gates."
+        )
+        self._restore_actions_after_cfd()
+        message = (
+            f"{summary}\n\nFull result:\n"
+            f"{os.path.join(case_dir, 'simulation_result.json')}"
+        )
+        if passed:
+            QMessageBox.information(self, "CFD Evaluation Passed", message)
+        else:
+            QMessageBox.warning(self, "CFD Evaluation Failed Gates", message)
+
+    def on_cfd_error(self, message):
+        self.lbl_cfd_status.setText(f"CFD evaluation error: {message}")
+        self.lbl_status.setText(f"CFD evaluation error: {message}")
+        self.append_cfd_log(f"\nERROR: {message}")
+        self._restore_actions_after_cfd()
+        QMessageBox.critical(self, "CFD Evaluation Error", message)
+
+    def on_cfd_cancelled(self, case_dir):
+        self.last_cfd_case_dir = case_dir
+        self.btn_open_cfd_folder.setEnabled(bool(case_dir))
+        self.lbl_cfd_status.setText("CFD evaluation cancelled.")
+        self.lbl_status.setText("CFD evaluation cancelled.")
+        self.append_cfd_log("\nCFD evaluation cancelled by the user.")
+        self._restore_actions_after_cfd()
+
+    def open_cfd_results_folder(self):
+        if self.last_cfd_case_dir and os.path.isdir(self.last_cfd_case_dir):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self.last_cfd_case_dir))
+        else:
+            QMessageBox.warning(
+                self, "CFD results", "No completed CFD case directory is available."
+            )
+
     def on_liquid_changed(self, liquid_name: str):
         low, high = FLUID_TEMPERATURE_RANGES[liquid_name]
         defaults = {"Liquid Methane (LNG)": -161.5}
@@ -830,6 +1339,8 @@ class PumpStudioApp(QMainWindow):
 
     def start_computation(self):
         self.btn_compute.setEnabled(False)
+        self.btn_export.setEnabled(False)
+        self.btn_run_cfd.setEnabled(False)
         self.btn_edit_meridional.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.inputs_changed_during_computation = False
@@ -885,6 +1396,21 @@ class PumpStudioApp(QMainWindow):
         multistage = bool(design.architecture and design.architecture.is_multistage)
         self.design_is_stale = changed_while_running
         self.btn_export.setEnabled(not multistage and not self.design_is_stale)
+        can_run_cfd = not self.design_is_stale and self._cfd_selection_is_supported()
+        self.btn_run_cfd.setEnabled(can_run_cfd)
+        if self.cfd_output_uses_default:
+            self.edit_cfd_output.setText(
+                os.path.join(SCRIPT_DIR, "output", design.design_id)
+            )
+        self.lbl_cfd_status.setText(
+            "Ready to export, mesh, solve, and evaluate this design."
+            if can_run_cfd
+            else (
+                "Inputs changed during generation; regenerate before CFD evaluation."
+                if self.design_is_stale
+                else "Automated CFD requires the complete single-stage volute assembly."
+            )
+        )
         self.chk_cutaway_shroud.setEnabled(
             design.impeller.configuration == "Closed" and bool(imp_cutaway_stl)
         )
@@ -1309,6 +1835,19 @@ class PumpStudioApp(QMainWindow):
         self.open_meridional_after_compute = False
         self.progress_bar.setVisible(False)
         self.btn_compute.setEnabled(True)
+        self.btn_export.setEnabled(
+            bool(
+                self.current_design
+                and not self.design_is_stale
+                and not (
+                    self.current_design.architecture
+                    and self.current_design.architecture.is_multistage
+                )
+            )
+        )
+        self.btn_run_cfd.setEnabled(
+            bool(not self.design_is_stale and self._cfd_selection_is_supported())
+        )
         self.btn_edit_meridional.setEnabled(
             bool(
                 self.current_design
@@ -1344,6 +1883,7 @@ class PumpStudioApp(QMainWindow):
         self.progress_bar.setVisible(True)
         self.btn_compute.setEnabled(False)
         self.btn_export.setEnabled(False)
+        self.btn_run_cfd.setEnabled(False)
         self.export_worker = ExportWorker(
             self.current_design,
             target_dir,
@@ -1366,6 +1906,9 @@ class PumpStudioApp(QMainWindow):
                     and self.current_design.architecture.is_multistage
                 )
             )
+        )
+        self.btn_run_cfd.setEnabled(
+            bool(not self.design_is_stale and self._cfd_selection_is_supported())
         )
         msg = "Exported CAD and CFD package:\n\n"
         for path in exported_files.values():
@@ -1390,6 +1933,9 @@ class PumpStudioApp(QMainWindow):
                 )
             )
         )
+        self.btn_run_cfd.setEnabled(
+            bool(not self.design_is_stale and self._cfd_selection_is_supported())
+        )
         self.lbl_status.setText(f"Export error: {message}")
         QMessageBox.critical(self, "Export Error", message)
 
@@ -1413,7 +1959,7 @@ class PumpStudioApp(QMainWindow):
                 left: 10px;
                 padding: 0 5px;
             }
-            QSpinBox, QDoubleSpinBox, QComboBox {
+            QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {
                 background-color: #1e293b;
                 border: 1px solid #475569;
                 border-radius: 4px;
@@ -1421,7 +1967,8 @@ class PumpStudioApp(QMainWindow):
                 color: #ffffff;
                 font-size: 13px;
             }
-            QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+            QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus,
+            QLineEdit:focus, QPlainTextEdit:focus {
                 border: 1px solid #38bdf8;
             }
             QRadioButton, QCheckBox {
